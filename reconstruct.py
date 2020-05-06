@@ -15,17 +15,17 @@ def main():
     )
 
     parser.add_argument('-i', '--input', dest='input', required=True, action='store',
-                        help='point cloud input file, should be a ply file.', type=str)
+                        help='point cloud input ply file', type=str)
     parser.add_argument('-o', '--output', dest='output', required=True, action='store',
-                        help='the output file, in which the mesh is stored.', type=str)
-    parser.add_argument('--filtered_cloud', dest='filtered_cloud', required=False, type=str)
+                        help='mesh output ply file', type=str)
+    parser.add_argument('--filtered-cloud', dest='filtered_cloud', required=False, type=str)
     parser.add_argument('-f', '--filter', dest='filter', required=False, default=True, action='store_true',
                         help='remove outliers')
-    parser.add_argument('--nb_points', dest='filter_nb_points', required=False, default=10, action='store',
-                        help='Filter parameter: The minimum number of neighbour points within the filter radius.',
+    parser.add_argument('--f-points', dest='filter_nb_points', required=False, default=10, action='store',
+                        help='filter parameter: The minimum number of neighbour points within the filter radius.',
                         type=check_positive)
-    parser.add_argument('--radius', dest='filter_radius', required=False, default=0.2, action='store',
-                        help='Filter parameter: The radius in which to count for the minimum number of points.',
+    parser.add_argument('--f-radius', dest='filter_radius', required=False, default=0.2, action='store',
+                        help='filter parameter: The radius in which to count for the minimum number of points.',
                         type=float)
     parser.add_argument('--depth', dest='depth', required=False, default=14, action='store',
                         help='Maximum depth of the tree that will be used for surface reconstruction. '
@@ -34,6 +34,15 @@ def main():
                              ' adapts the octree to the sampling density, the specified reconstruction '
                              'depth is only an upper bound.',
                         type=check_positive)
+    parser.add_argument('-n', '--normals', dest='normals', action='store_true', required=False, default=True,
+                        help='esitamte normals')
+    parser.add_argument('--n-radius', dest='n_radius', action='store', required=False, default=0.3, type=float,
+                        help='radius to consider for the normal estimation.')
+    parser.add_argument('--n-max-nn', dest='n_max_nn', action='store', required=False, default=30, type=float,
+                        help='maximum number of nearest neighbors for normal estimation.')
+    parser.add_argument('--linear-fit', dest='linear_fit', required=False, default=False, action='store_true',
+                        help='If true, the reconstructor use linear interpolation to estimate the positions '
+                             'of iso-vertices.')
 
     args = parser.parse_args()
 
@@ -44,14 +53,17 @@ def main():
         cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
         print("Removed", len(ids), "points.")
 
-    cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.3, max_nn=30))
+    if args.normals:
+        cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+            radius=args.n_radius, max_nn=args.n_max_nn))
 
     if args.filtered_cloud:
         print("Save filtered cloud to", args.filtered_cloud)
         o3d.io.write_point_cloud(args.filtered_cloud, cloud, print_progress=True)
 
     print("Reconstructing the PCD to a mesh using poisson...")
-    mesh, vec = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(cloud, depth=args.depth)
+    mesh, vec = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+        cloud, depth=args.depth, linear_fit=args.linear_fit)
 
     print("Remove degenerated, duplicated, non manifold, and unreferenced triangles, edges and vertices...")
     mesh = mesh.remove_degenerate_triangles()
