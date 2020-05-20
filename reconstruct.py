@@ -8,6 +8,7 @@ def check_positive(value):
         raise argparse.ArgumentTypeError("%s has to be a positive int value > 0" % value)
     return ivalue
 
+
 def main():
 
     parser = argparse.ArgumentParser(
@@ -34,7 +35,7 @@ def main():
                              ' adapts the octree to the sampling density, the specified reconstruction '
                              'depth is only an upper bound.',
                         type=check_positive)
-    parser.add_argument('-n', '--normals', dest='normals', action='store_true', required=False, default=True,
+    parser.add_argument('-n', '--normals', dest='normals', action='store_true', required=False, default=False,
                         help='esitamte normals')
     parser.add_argument('--n-radius', dest='n_radius', action='store', required=False, default=0.3, type=float,
                         help='radius to consider for the normal estimation.')
@@ -43,6 +44,8 @@ def main():
     parser.add_argument('--linear-fit', dest='linear_fit', required=False, default=False, action='store_true',
                         help='If true, the reconstructor use linear interpolation to estimate the positions '
                              'of iso-vertices.')
+    parser.add_argument('--edge-collapse', dest='edge_collapse', action='store', default=0, type=check_positive,
+                        help='Use Quadric edge collapse, specify the target number of triangles')
 
     args = parser.parse_args()
 
@@ -53,7 +56,11 @@ def main():
         cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
         print("Removed", len(ids), "points.")
 
-    if args.normals:
+    if args.normals or not cloud.has_normals():
+        if not cloud.has_normals():
+            print("No normals in the point cloud, estimating normals...")
+        else:
+            print("Estimate normals...")
         cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
             radius=args.n_radius, max_nn=args.n_max_nn))
 
@@ -70,6 +77,10 @@ def main():
     mesh = mesh.remove_duplicated_triangles()
     mesh = mesh.remove_non_manifold_edges()
     mesh = mesh.remove_unreferenced_vertices()
+
+    if args.edge_collapse:
+        print("Quadric edge collapse to a target triangle number %s" % args.edge_collapse)
+        mesh = mesh.simplify_quadric_decimation(args.edge_collapse)
 
     print("Save mesh to ", args.output, "...")
     o3d.io.write_triangle_mesh(args.output, mesh, print_progress=True)
