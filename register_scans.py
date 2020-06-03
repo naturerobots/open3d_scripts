@@ -106,9 +106,17 @@ def pick_points(pcd, node_from, node_to, node_current):
     vis.destroy_window()
     return vis.get_picked_points()
 
-def register_pointcloud_pair(node_from, node_to, pointclouds, run_icp=True, max_icp_distance=0.2, show_result=True):
+def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True):
     pointcloud_from = pointclouds[node_from]
     pointcloud_to = pointclouds[node_to]
+
+    transformation_file = f'{temp_dir}/{node_from}_to_{node_to}.trans'
+    information_file = f'{temp_dir}/{node_from}_to_{node_to}.info'
+
+    # already done
+    if os.path.isfile(transformation_file) and os.path.isfile(information_file):
+        print(f'{color.BOLD}Found registration of {node_from} and {node_to}{color.ENDC}')
+        return (np.loadtxt(transformation_file), np.loadtxt(information_file))
 
     # pick at least three correspondences between both pointclouds
     picked_points_from = []
@@ -186,9 +194,12 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, run_icp=True, max_
             # rerun pair registration
             return register_pointcloud_pair(node_from, node_to, pointclouds, run_icp, max_icp_distance, show_result)
 
+    np.savetxt(transformation_file, transformation)
+    np.savetxt(information_file, icp_information)
+
     return (transformation, icp_information)
 
-def register_pointclouds(pointclouds, nx_pose_graph, root_node, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
+def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
     # because every node is a key of the adjacency list, this will give all node ids
     node_id_mapping = {}
     for index, node in enumerate(nx_pose_graph.nodes()):
@@ -208,6 +219,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, run_icp=True, ma
                 node_from,
                 node_to,
                 pointclouds,
+                temp_dir,
                 run_icp,
                 max_icp_distance,
                 show_result)
@@ -252,7 +264,7 @@ def main():
                         help="csv containing an edgelist describing the graph")
 
     parser.add_argument('--temp', dest='temp_dir', required=False, default="temp", action='store',
-                        help='directory of the temporary files that store the current progress of the registration', type=str)
+            help='directory of the temporary files that store the current progress of the registration. default: "temp"', type=str)
 
     scan_file_pattern = "scan_*.ply"
     parser.add_argument('--scan-file-pattern', dest='scan_pattern', action='store', required=False,
@@ -324,10 +336,16 @@ def main():
         plt.show()
 
     print(f'{color.OKBLUE}{color.BOLD}Registering pointclouds ...{color.ENDC}')
+    # create temp dir
+    if not os.path.exists(args.temp_dir):
+        os.makedirs(args.temp_dir)
+
+    # start registration
     o3d_pose_graph, node_id_mapping = register_pointclouds(
             pointclouds,
             nx_pose_graph,
             root_node,
+            args.temp_dir,
             not args.no_icp,
             args.icp_max_distance,
             not args.hide_result,
