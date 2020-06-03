@@ -1,3 +1,4 @@
-1;2
+# this is a example pose graph which can be used for registration
+1;2 # this means that there is an edge going from 1 to 2 so scan 2 was captured after 1
 0;1
 0;2

@@ -43,14 +43,19 @@ def load_pointcloud(file, args = None, preview = False):
     pointcloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     return pointcloud
 
+def decomment(csvfile):
+    for row in csvfile:
+        raw = row.split('#')[0].strip()
+        if raw:
+            yield raw
+
 def load_posegraph(args):
     graph = nx.DiGraph()
     pointclouds = {}
-    pose_graph_adjacency = {}
     with open(args.graph, newline='') as graph_file:
         os.chdir(args.dataset)
 
-        graph_data = csv.reader(graph_file, delimiter=';', quotechar='#')
+        graph_data = csv.reader(decomment(graph_file), delimiter=';', quotechar='#')
         for edge in graph_data:
             id_from = str(edge[0]).zfill(args.num_id_digits)
             id_to = str(edge[1]).zfill(args.num_id_digits)
@@ -75,19 +80,10 @@ def load_posegraph(args):
             if not edge[1] in pointclouds:
                 pointclouds[edge[1]] = load_pointcloud(file_to, args=args, preview=True)
 
-            # add edge to adjacency list
-            if not edge[0] in pose_graph_adjacency:
-                pose_graph_adjacency[edge[0]] = []
-            if not edge[1] in pose_graph_adjacency[edge[0]]:
-                pose_graph_adjacency[edge[0]].append(edge[1])
-            # make sure to use every node as a key
-            if not edge[1] in pose_graph_adjacency:
-                pose_graph_adjacency[edge[1]] = []
-
             # add edge to networkx graph
             graph.add_edge(edge[0], edge[1])
 
-    return pointclouds, pose_graph_adjacency, graph
+    return pointclouds, graph
 
 def pick_points(pcd, node_from, node_to, node_current):
     print("")
@@ -189,28 +185,58 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, run_icp=True, max_
             # rerun pair registration
             return register_pointcloud_pair(node_from, node_to, pointclouds, run_icp, max_icp_distance, show_result)
 
-        return (transformation, icp_information)
+    return (transformation, icp_information)
 
-def register_pointclouds(pointclouds, pose_graph_adjacency, run_icp=True, max_icp_distance=0.2, show_result=True):
+def register_pointclouds(pointclouds, nx_pose_graph, root_node, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
     # because every node is a key of the adjacency list, this will give all node ids
-    nodes = [node for node in pose_graph_adjacency.keys()]
-    graph_id_mapping = {}
-    for idx, id in enumerate(nodes):
-        print("id:", id, "idx:", idx)
-        graph_id_mapping[id] = idx
+    node_id_mapping = {}
+    for index, node in enumerate(nx_pose_graph.nodes()):
+        node_id_mapping[node] = index
 
-    pose_graph = o3d.registration.PoseGraph()
+    o3d_pose_graph = o3d.registration.PoseGraph()
+    for _ in range(0, len(nx_pose_graph.nodes())):
+        o3d_pose_graph.nodes.append(o3d.registration.PoseGraphNode(np.identity(4)))
 
-    for node_from, nodes_to in pose_graph_adjacency.items():
-        for node_to in nodes_to:
-            # calculate transformation for the current edge of the posegraph
-            transformation, icp_information = register_pointcloud_pair(
-                    node_from,
-                    node_to,
-                    pointclouds,
-                    run_icp,
-                    max_icp_distance,
-                    show_result)
+    for node_from, node_to in nx.edge_dfs(nx_pose_graph):
+        node_from_id = node_id_mapping[node_from]
+        node_to_id = node_id_mapping[node_to]
+
+        # calculate transformation for the current edge of the posegraph
+        print(f'{color.BOLD}Starting registration between pointcloud {node_from} and {node_to} ...{color.ENDC}')
+        transformation, icp_information = register_pointcloud_pair(
+                node_from,
+                node_to,
+                pointclouds,
+                run_icp,
+                max_icp_distance,
+                show_result)
+
+        # only update pose of the node if the pose hasnt been set yet. The other possible case is a loop closure
+        if (o3d_pose_graph.nodes[node_to_id].pose == np.identity(4)).all():
+            o3d_pose_graph.nodes[node_to_id].pose = np.dot(o3d_pose_graph.nodes[node_from_id].pose, transformation)
+
+        # add edge to posegraph
+        # if we have a loop closure and didnt update the pose, we marh our edge as uncertain
+        print(f'{color.BOLD}Adding new edge from pointcloud {node_from} (id {node_from_id}) to ppintcloud {node_to} (id {node_to_id}){color.ENDC}')
+        o3d_pose_graph.edges.append(
+            o3d.registration.PoseGraphEdge(node_to_id,
+                                           node_from_id,
+                                           transformation,
+                                           icp_information,
+                                           uncertain=(o3d_pose_graph.nodes[node_to_id].pose != np.identity(4)).all()))
+
+    # optimize the posegraph
+    if optimize_graph:
+        print(f'{color.BOLD}Optimizing pose graph ...{color.ENDC}')
+        option = o3d.registration.GlobalOptimizationOption(
+            max_correspondence_distance=max_icp_distance,
+            edge_prune_threshold=3.0,
+            preference_loop_closure=0.3,
+            reference_node=0)
+        o3d.registration.global_optimization(
+            o3d_pose_graph, o3d.registration.GlobalOptimizationLevenbergMarquardt(),
+            o3d.registration.GlobalOptimizationConvergenceCriteria(), option)
+        print(f'{color.BOLD}Finished optimization{color.ENDC}')
 
 def main():
     parser = argparse.ArgumentParser(description='Register several scans using Open3D',)
@@ -243,25 +269,50 @@ def main():
                         help='preview filter parameter: The radius in which to count for the minimum number of points.',
                         type=float)
 
+    # optimization
+    parser.add_argument('--no-icp', dest='no_icp', required=False, default=False, action='store_true',
+                        help='disables the optimization of the registration of two pointclouds using icp')
+
+    parser.add_argument('--icp-max-distance', dest='icp_max_distance', required=False, default=0.2, action='store',
+                        help='maximum distance allowed to satisfy icp')
+
+    parser.add_argument('--no-optimization', dest='no_optimization', required=False, default=False, action='store_true',
+                        help='disables the optimization of the resulting posegraph')
+
     # miscelaneous options
     parser.add_argument('--show-graph', dest='show_graph', required=False, default=False, action='store_true',
                         help='shows the graph before starting registration')
+
+    parser.add_argument('--hide-result', dest='hide_result', required=False, default=False, action='store_true',
+                        help='disables showing the resutlt of the registation of two pointclouds')
 
     args = parser.parse_args()
 
     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
 
     print(f'{color.OKBLUE}{color.BOLD}Loading graph and pointclouds ...{color.ENDC}')
-    pointclouds, pose_graph_adjacency, graph = load_posegraph(args)
+    pointclouds, nx_pose_graph = load_posegraph(args)
     print(f'{color.OKBLUE}{color.BOLD}Finished loading graph and pointclouds{color.ENDC}')
+
+    # check pose graph correctness
+    if len(list(nx.simple_cycles(nx_pose_graph))) > 0:
+        print(f'{color.FAIL}ERROR: There are no circles allowed in the pose graph!{color.ENDC}')
+        print('Tf your circle is a loop closure, flip the last edge of the loop.')
+        return
+
+    root_nodes = [node for node in nx_pose_graph.nodes() if len(list(nx_pose_graph.in_edges(node))) == 0]
+    if len(root_nodes) != 1:
+        print(f'{color.FAIL}ERROR: There is only one node with in-degree 1 (origin node) allowed in the pose graph!{color.ENDC}')
+        return
+    root_node = root_nodes[0]
 
     # show posegraph
     if args.show_graph:
-        nx.draw_networkx(graph, nx.spring_layout(graph))
+        nx.draw_networkx(nx_pose_graph, nx.spring_layout(nx_pose_graph))
         plt.show()
 
     print(f'{color.OKBLUE}{color.BOLD}Registering pointclouds ...{color.ENDC}')
-    #register_pointclouds(pointclouds, pose_graph_adjacency)
+    register_pointclouds(pointclouds, nx_pose_graph, root_node, not args.no_icp, args.icp_max_distance, not args.hide_result, not args.no_optimization)
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
 
