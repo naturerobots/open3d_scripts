@@ -53,6 +53,7 @@ def decomment(csvfile):
 def load_posegraph(args):
     graph = nx.DiGraph()
     pointclouds = {}
+    owd = os.getcwd()
     with open(args.graph, newline='') as graph_file:
         os.chdir(args.dataset)
 
@@ -83,6 +84,8 @@ def load_posegraph(args):
 
             # add edge to networkx graph
             graph.add_edge(edge[0], edge[1])
+
+    os.chdir(owd)
 
     return pointclouds, graph
 
@@ -353,6 +356,7 @@ def main():
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
     print(f'{color.OKBLUE}{color.BOLD}Saving results ...{color.ENDC}')
+    os.chdir(args.dataset)
     for node in node_id_mapping.keys():
         node_id = node_id_mapping[node]
         node_text = str(node).zfill(args.num_id_digits)

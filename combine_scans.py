@@ -49,6 +49,7 @@ def main():
                         help='transformation file pattern with file extension, default: {}'.format(trans_file_pattern))
 
     args = parser.parse_args()
+    owd = os.getcwd()
     os.chdir(args.dataset)
     sf_pattern = re.compile(args.scan_pattern.replace("*", "(.*)"))
     cloud = o3d.geometry.PointCloud()
@@ -80,6 +81,8 @@ def main():
     print("Remove radius outlier...")
     cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
     print("Removed", len(ids), "points.")
+
+    os.chdir(owd)
 
     print("Save combined cloud to ", args.output, "...")
     o3d.io.write_point_cloud(args.output, cloud, print_progress=True)
