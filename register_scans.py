@@ -238,6 +238,8 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, run_icp=True, ma
             o3d.registration.GlobalOptimizationConvergenceCriteria(), option)
         print(f'{color.BOLD}Finished optimization{color.ENDC}')
 
+    return (o3d_pose_graph, node_id_mapping)
+
 def main():
     parser = argparse.ArgumentParser(description='Register several scans using Open3D',)
 
@@ -260,7 +262,7 @@ def main():
                         type=int, help='Fill up id with zeros to have at least this amount of digits')
 
     # filters for preview to filter the rinal cloud, use the filter script
-    parser.add_argument('-v', '--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
+    parser.add_argument('--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
                         help='down sample voxel-size for preview')
     parser.add_argument('--f-points', dest='filter_nb_points', required=False, default=10, action='store',
                         help='preview filter parameter: The minimum number of neighbour points within the filter radius.',
@@ -286,9 +288,13 @@ def main():
     parser.add_argument('--hide-result', dest='hide_result', required=False, default=False, action='store_true',
                         help='disables showing the resutlt of the registation of two pointclouds')
 
+    parser.add_argument('-v', '--verbose', dest='verbose', required=False, default=False, action='store_true',
+                        help='enable open3d debug output')
+
     args = parser.parse_args()
 
-    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+    if args.verbose:
+        o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
 
     print(f'{color.OKBLUE}{color.BOLD}Loading graph and pointclouds ...{color.ENDC}')
     pointclouds, nx_pose_graph = load_posegraph(args)
@@ -312,9 +318,22 @@ def main():
         plt.show()
 
     print(f'{color.OKBLUE}{color.BOLD}Registering pointclouds ...{color.ENDC}')
-    register_pointclouds(pointclouds, nx_pose_graph, root_node, not args.no_icp, args.icp_max_distance, not args.hide_result, not args.no_optimization)
+    o3d_pose_graph, node_id_mapping = register_pointclouds(
+            pointclouds,
+            nx_pose_graph,
+            root_node,
+            not args.no_icp,
+            args.icp_max_distance,
+            not args.hide_result,
+            not args.no_optimization)
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
+    print(f'{color.OKBLUE}{color.BOLD}Saving results ...{color.ENDC}')
+    for node in node_id_mapping.keys():
+        node_id = node_id_mapping[node]
+        node_text = str(node).zfill(args.num_id_digits)
+        np.savetxt(args.trans_pattern.replace('*', node_text), o3d_pose_graph.nodes[node_id].pose)
+    print(f'{color.OKBLUE}{color.BOLD}Finished saving results{color.ENDC}')
 
 if __name__ == "__main__":
     main()
