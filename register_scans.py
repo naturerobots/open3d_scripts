@@ -1,3 +1,4 @@
+#!python3
 '''
 Posegraph:
     Directed graph with a node pointing to all its successors.
@@ -250,14 +251,19 @@ def main():
     parser.add_argument('-g', '--graph', dest='graph', required=False, action='store', default="graph.csv",
                         help="csv containing an edgelist describing the graph")
 
+    parser.add_argument('--temp', dest='temp_dir', required=False, default="temp", action='store',
+                        help='directory of the temporary files that store the current progress of the registration', type=str)
+
     scan_file_pattern = "scan_*.ply"
     parser.add_argument('--scan-file-pattern', dest='scan_pattern', action='store', required=False,
                         default=scan_file_pattern, type=str,
                         help='scan file pattern with file extension. default: {}'.format(scan_file_pattern))
+
     trans_file_pattern = "scan_*.dat"
     parser.add_argument('--trans-file-pattern', dest='trans_pattern', action='store', required=False,
                         default=trans_file_pattern, type=str,
                         help='transformation file pattern with file extension, default: {}'.format(trans_file_pattern))
+
     parser.add_argument('--id-digits', dest='num_id_digits', required=False, action='store', default=0,
                         type=int, help='Fill up id with zeros to have at least this amount of digits')
 

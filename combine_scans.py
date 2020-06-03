@@ -1,3 +1,4 @@
+#!python3
 import argparse
 import open3d as o3d
 import numpy as np
@@ -57,7 +58,7 @@ def main():
         id = match.group(1)
         trans_file = args.trans_pattern.replace("*", id)
         if not os.path.isfile(trans_file):
-            print("Transformation file {} does not exist. Skipp scan file {}.".format(trans_file, scan_file))
+            print("Transformation file {} does not exist. Skip scan file {}.".format(trans_file, scan_file))
             continue
         trans = np.loadtxt(trans_file)
         print("read {} and transform with {}".format(scan_file, trans_file))
