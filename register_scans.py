@@ -61,7 +61,6 @@ def decomment(csvfile):
 def load_posegraph(args):
     graph = nx.DiGraph()
     pointclouds = {}
-    owd = os.getcwd()
     with open(args.graph, newline='') as graph_file:
         os.chdir(args.dataset)
 
@@ -92,8 +91,6 @@ def load_posegraph(args):
 
             # add edge to networkx graph
             graph.add_edge(edge[0], edge[1])
-
-    os.chdir(owd)
 
     return pointclouds, graph
 
@@ -205,7 +202,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
         if bad:
             print(f'{color.WARNING}Retrying registration of point cloud {node_from} and {node_to}.{color.ENDC}')
             # rerun pair registration
-            return register_pointcloud_pair(node_from, node_to, pointclouds, run_icp, max_icp_distance, show_result)
+            return register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp, max_icp_distance, show_result)
 
     np.savetxt(transformation_file, transformation)
     np.savetxt(information_file, icp_information)
@@ -278,8 +275,9 @@ def main():
     parser.add_argument('-g', '--graph', dest='graph', required=False, action='store', default="graph.csv",
                         help="csv containing an edgelist describing the graph")
 
-    parser.add_argument('--temp', dest='temp_dir', required=False, default="temp", action='store',
-            help='directory of the temporary files that store the current progress of the registration. default: "temp"', type=str)
+    parser.add_argument('--temp', dest='temp_dir', required=False, default="transformation", action='store',
+                        help='directory of the temporary files that store the current progress of the registration. \
+                            (inside your dataset directory) default: "transformation"', type=str)
 
     scan_file_pattern = "scan_*.ply"
     parser.add_argument('--scan-file-pattern', dest='scan_pattern', action='store', required=False,
@@ -368,7 +366,6 @@ def main():
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
     print(f'{color.OKBLUE}{color.BOLD}Saving results ...{color.ENDC}')
-    os.chdir(args.dataset)
     for node in node_id_mapping.keys():
         node_id = node_id_mapping[node]
         node_text = str(node).zfill(args.num_id_digits)
