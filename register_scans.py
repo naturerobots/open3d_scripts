@@ -15,6 +15,7 @@ import os
 import re
 import csv
 
+
 class color:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -25,30 +26,37 @@ class color:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+
 def check_positive(value):
     ivalue = int(value)
     if ivalue <= 0:
         raise argparse.ArgumentTypeError("%s has to be a positive int value > 0" % value)
     return ivalue
 
+
 def load_pointcloud(file, args = None, preview = False):
-    print(f'Loading pointcloud from file {file} ...')
+    print(f'Loading point cloud from file {file} ...')
     pointcloud = o3d.io.read_point_cloud(file)
     if preview:
         # filter cloud if it is used for preview
-        print('Filtering pointcloud ...')
+        print('Filtering point cloud ...')
         pointcloud = pointcloud.voxel_down_sample(voxel_size=args.voxel_size)
-        pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
 
-    print('Estimating normals ...')
-    pointcloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+
+    if not pointcloud.has_normals():
+        print('Estimating normals ...')
+        pointcloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
     return pointcloud
+
 
 def decomment(csvfile):
     for row in csvfile:
         raw = row.split('#')[0].strip()
         if raw:
             yield raw
+
 
 def load_posegraph(args):
     graph = nx.DiGraph()
@@ -89,25 +97,27 @@ def load_posegraph(args):
 
     return pointclouds, graph
 
+
 def pick_points(pcd, node_from, node_to, node_current):
     print("")
     print("+--------------------------------------------------------------------------+")
     print("| 1) Please pick at least three correspondences using [shift + left click] |")
     print("|    Press [shift + right click] to undo point picking                     |")
-    print("| 2) Afther picking points, press q for close the window                   |")
+    print("| 2) After picking points, press q for close the window                    |")
     print("|                                                                          |")
-    print("| If you messed something up in the first pointcloud of the current pair   |")
-    print("| of pointclouds, simply select no points and press q. By doing this the   |")
-    print("| procedure will be restarted for the current pair of pointclouds.         |")
+    print("| If you messed something up in the first point cloud of the current pair  |")
+    print("| of point clouds, simply select no points and press q. By doing this the  |")
+    print("| procedure will be restarted for the current pair of point clouds.        |")
     print("+--------------------------------------------------------------------------+")
     print("")
 
     vis = o3d.visualization.VisualizerWithEditing()
-    vis.create_window(f'Pick correspondences between pointcloud {node_from} and {node_to} - pointcloud {node_current}')
+    vis.create_window(f'Pick correspondences between point cloud {node_from} and {node_to} - point cloud {node_current}')
     vis.add_geometry(pcd)
     vis.run()
     vis.destroy_window()
     return vis.get_picked_points()
+
 
 def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True):
     pointcloud_from = pointclouds[node_from]
@@ -181,19 +191,19 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
         # show result
         print("")
         print("+--------------------------------------------------------------------------+")
-        print("| Take a look at the combined pointcloud. If the registration looks bad,   |")
-        print("| press B and then q to rerun the registration of the current pointclouds. |")
+        print("| Take a look at the combined point cloud. If the registration looks bad,  |")
+        print("| press B and then q to rerun the registration of the current point clouds.|")
         print("| If everything looks fine, just press q.                                  |")
         print("+--------------------------------------------------------------------------+")
         print("")
 
         o3d.visualization.draw_geometries_with_key_callbacks(
                 [transformed_to, pointcloud_from],
-                window_name=f'Result of registration between pointcloud {node_from} and {node_to}',
+                window_name=f'Result of registration between point cloud {node_from} and {node_to}',
                 key_to_callback=key_to_callback)
 
         if bad:
-            print(f'{color.WARNING}Retrying registration of pointcloud {node_from} and {node_to}.{color.ENDC}')
+            print(f'{color.WARNING}Retrying registration of point cloud {node_from} and {node_to}.{color.ENDC}')
             # rerun pair registration
             return register_pointcloud_pair(node_from, node_to, pointclouds, run_icp, max_icp_distance, show_result)
 
@@ -201,6 +211,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
     np.savetxt(information_file, icp_information)
 
     return (transformation, icp_information)
+
 
 def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
     # because every node is a key of the adjacency list, this will give all node ids
@@ -217,7 +228,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_ic
         node_to_id = node_id_mapping[node_to]
 
         # calculate transformation for the current edge of the posegraph
-        print(f'{color.BOLD}Starting registration between pointcloud {node_from} and {node_to} ...{color.ENDC}')
+        print(f'{color.BOLD}Starting registration between point cloud {node_from} and {node_to} ...{color.ENDC}')
         transformation, icp_information = register_pointcloud_pair(
                 node_from,
                 node_to,
@@ -227,13 +238,13 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_ic
                 max_icp_distance,
                 show_result)
 
-        # only update pose of the node if the pose hasnt been set yet. The other possible case is a loop closure
+        # only update pose of the node if the pose has not been set yet. The other possible case is a loop closure
         if (o3d_pose_graph.nodes[node_to_id].pose == np.identity(4)).all():
             o3d_pose_graph.nodes[node_to_id].pose = np.dot(o3d_pose_graph.nodes[node_from_id].pose, transformation)
 
-        # add edge to posegraph
-        # if we have a loop closure and didnt update the pose, we marh our edge as uncertain
-        print(f'{color.BOLD}Adding new edge from pointcloud {node_from} (id {node_from_id}) to ppintcloud {node_to} (id {node_to_id}){color.ENDC}')
+        # add edge to pose graph
+        # if we have a loop closure and didnt update the pose, we mark our edge as uncertain
+        print(f'{color.BOLD}Adding new edge from point cloud {node_from} (id {node_from_id}) to point cloud {node_to} (id {node_to_id}){color.ENDC}')
         o3d_pose_graph.edges.append(
             o3d.registration.PoseGraphEdge(node_to_id,
                                            node_from_id,
@@ -241,7 +252,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_ic
                                            icp_information,
                                            uncertain=(o3d_pose_graph.nodes[node_to_id].pose != np.identity(4)).all()))
 
-    # optimize the posegraph
+    # optimize the pose graph
     if optimize_graph:
         print(f'{color.BOLD}Optimizing pose graph ...{color.ENDC}')
         option = o3d.registration.GlobalOptimizationOption(
@@ -255,6 +266,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_ic
         print(f'{color.BOLD}Finished optimization{color.ENDC}')
 
     return (o3d_pose_graph, node_id_mapping)
+
 
 def main():
     parser = argparse.ArgumentParser(description='Register several scans using Open3D',)
@@ -362,6 +374,7 @@ def main():
         node_text = str(node).zfill(args.num_id_digits)
         np.savetxt(args.trans_pattern.replace('*', node_text), o3d_pose_graph.nodes[node_id].pose)
     print(f'{color.OKBLUE}{color.BOLD}Finished saving results{color.ENDC}')
+
 
 if __name__ == "__main__":
     main()
