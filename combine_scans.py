@@ -25,7 +25,7 @@ def main():
     parser.add_argument('-o', '--output', dest='output', required=True, action='store',
                         help='cloud output ply file', type=str)
     parser.add_argument('-v', '--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
-                        help='down sample voxel-size')
+                        help='down sample voxel-size', type=float)
     parser.add_argument('--f-points', dest='filter_nb_points', required=False, default=10, action='store',
                         help='filter parameter: The minimum number of neighbour points within the filter radius.',
                         type=check_positive)
