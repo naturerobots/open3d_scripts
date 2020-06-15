@@ -61,7 +61,6 @@ def decomment(csvfile):
 def load_posegraph(args):
     graph = nx.DiGraph()
     pointclouds = {}
-    owd = os.getcwd()
     with open(args.graph, newline='') as graph_file:
         os.chdir(args.dataset)
 
@@ -93,8 +92,6 @@ def load_posegraph(args):
             # add edge to networkx graph
             graph.add_edge(edge[0], edge[1])
 
-    os.chdir(owd)
-
     return pointclouds, graph
 
 
@@ -119,7 +116,7 @@ def pick_points(pcd, node_from, node_to, node_current):
     return vis.get_picked_points()
 
 
-def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True):
+def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, run_icp=True, max_icp_distance=0.2, show_result=True):
     pointcloud_from = pointclouds[node_from]
     pointcloud_to = pointclouds[node_to]
 
@@ -129,28 +126,35 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
     # already done
     if os.path.isfile(transformation_file) and os.path.isfile(information_file):
         print(f'{color.BOLD}Found registration of {node_from} and {node_to}{color.ENDC}')
-        return (np.loadtxt(transformation_file), np.loadtxt(information_file))
+        transformation = np.loadtxt(transformation_file)
+        icp_information = np.loadtxt(information_file)
 
-    # pick at least three correspondences between both pointclouds
-    picked_points_from = []
-    picked_points_to = []
-    while len(picked_points_from) < 3 or len(picked_points_to) < 3 or len(picked_points_from) != len(picked_points_to):
-        picked_points_from = pick_points(pointcloud_from , node_from, node_to, node_from)
-        picked_points_to = pick_points(pointcloud_to, node_from, node_to, node_to)
+        print(refine)
+        if node_to not in refine:
+            return (transformation, icp_information)
+        else:
+            print(f'{color.BOLD}Refining registration of {node_from} and {node_to}{color.ENDC}')
+    else:
+        # pick at least three correspondences between both pointclouds
+        picked_points_from = []
+        picked_points_to = []
+        while len(picked_points_from) < 3 or len(picked_points_to) < 3 or len(picked_points_from) != len(picked_points_to):
+            picked_points_from = pick_points(pointcloud_from , node_from, node_to, node_from)
+            picked_points_to = pick_points(pointcloud_to, node_from, node_to, node_to)
 
-    correspondences = np.zeros((len(picked_points_from), 2))
-    correspondences[:, 0] = picked_points_to
-    correspondences[:, 1] = picked_points_from
+        correspondences = np.zeros((len(picked_points_from), 2))
+        correspondences[:, 0] = picked_points_to
+        correspondences[:, 1] = picked_points_from
 
-    # estimate rough transformation using correspondences
-    print(f'{color.BOLD}Compute a rough transform using the correspondences given by user ...{color.ENDC}')
-    p2p = o3d.registration.TransformationEstimationPointToPoint()
-    transformation = p2p.compute_transformation(
-            pointcloud_to,
-            pointcloud_from,
-            o3d.utility.Vector2iVector(correspondences))
+        # estimate rough transformation using correspondences
+        print(f'{color.BOLD}Compute a rough transform using the correspondences given by user ...{color.ENDC}')
+        p2p = o3d.registration.TransformationEstimationPointToPoint()
+        transformation = p2p.compute_transformation(
+                pointcloud_to,
+                pointcloud_from,
+                o3d.utility.Vector2iVector(correspondences))
 
-    icp_information = np.zeros((6, 6))
+        icp_information = np.zeros((6, 6))
 
     if run_icp:
         print(f'{color.BOLD}Applying point-to-plane ICP ...{color.ENDC}')
@@ -205,7 +209,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
         if bad:
             print(f'{color.WARNING}Retrying registration of point cloud {node_from} and {node_to}.{color.ENDC}')
             # rerun pair registration
-            return register_pointcloud_pair(node_from, node_to, pointclouds, run_icp, max_icp_distance, show_result)
+            return register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, run_icp, max_icp_distance, show_result)
 
     np.savetxt(transformation_file, transformation)
     np.savetxt(information_file, icp_information)
@@ -213,7 +217,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, run_icp=
     return (transformation, icp_information)
 
 
-def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
+def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
     # because every node is a key of the adjacency list, this will give all node ids
     node_id_mapping = {}
     for index, node in enumerate(nx_pose_graph.nodes()):
@@ -234,6 +238,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, run_ic
                 node_to,
                 pointclouds,
                 temp_dir,
+                refine,
                 run_icp,
                 max_icp_distance,
                 show_result)
@@ -278,8 +283,9 @@ def main():
     parser.add_argument('-g', '--graph', dest='graph', required=False, action='store', default="graph.csv",
                         help="csv containing an edgelist describing the graph")
 
-    parser.add_argument('--temp', dest='temp_dir', required=False, default="temp", action='store',
-            help='directory of the temporary files that store the current progress of the registration. default: "temp"', type=str)
+    parser.add_argument('--temp', dest='temp_dir', required=False, default="transformation", action='store',
+                        help='directory of the temporary files that store the current progress of the registration. \
+                            (inside your dataset directory) default: "transformation"', type=str)
 
     scan_file_pattern = "scan_*.ply"
     parser.add_argument('--scan-file-pattern', dest='scan_pattern', action='store', required=False,
@@ -313,6 +319,10 @@ def main():
 
     parser.add_argument('--no-optimization', dest='no_optimization', required=False, default=False, action='store_true',
                         help='disables the optimization of the resulting posegraph')
+
+    parser.add_argument('-r', '--refine', dest='refine', required=False, default=[], action='store', nargs='+',
+                        help='list of nodes whose poses should be refined (this does only work if "--no-icp" is not set)', type=str)
+
 
     # miscelaneous options
     parser.add_argument('--show-graph', dest='show_graph', required=False, default=False, action='store_true',
@@ -361,6 +371,7 @@ def main():
             nx_pose_graph,
             root_node,
             args.temp_dir,
+            args.refine,
             not args.no_icp,
             args.icp_max_distance,
             not args.hide_result,
@@ -368,7 +379,6 @@ def main():
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
     print(f'{color.OKBLUE}{color.BOLD}Saving results ...{color.ENDC}')
-    os.chdir(args.dataset)
     for node in node_id_mapping.keys():
         node_id = node_id_mapping[node]
         node_text = str(node).zfill(args.num_id_digits)
