@@ -291,7 +291,7 @@ def main():
                         default=trans_file_pattern, type=str,
                         help='transformation file pattern with file extension, default: {}'.format(trans_file_pattern))
 
-    parser.add_argument('--id-digits', dest='num_id_digits', required=False, action='store', default=0,
+    parser.add_argument('--id-digits', dest='num_id_digits', required=False, action='store', default=3,
                         type=int, help='Fill up id with zeros to have at least this amount of digits')
 
     # filters for preview to filter the rinal cloud, use the filter script
