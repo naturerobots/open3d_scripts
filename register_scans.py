@@ -42,7 +42,7 @@ def load_pointcloud(file, args = None, preview = False):
         print('Filtering point cloud ...')
         pointcloud = pointcloud.voxel_down_sample(voxel_size=args.voxel_size)
 
-    pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+    pointcloud, ids = pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
 
     if not pointcloud.has_normals():
         print('Estimating normals ...')
