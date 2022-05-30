@@ -148,7 +148,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
 
         # estimate rough transformation using correspondences
         print(f'{color.BOLD}Compute a rough transform using the correspondences given by user ...{color.ENDC}')
-        p2p = o3d.registration.TransformationEstimationPointToPoint()
+        p2p = o3d.pipelines.registration.TransformationEstimationPointToPoint()
         transformation = p2p.compute_transformation(
                 pointcloud_to,
                 pointcloud_from,
@@ -159,16 +159,16 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
     if run_icp:
         print(f'{color.BOLD}Applying point-to-plane ICP ...{color.ENDC}')
 
-        icp_fine = o3d.registration.registration_icp(
+        icp_fine = o3d.pipelines.registration.registration_icp(
             pointcloud_to,
             pointcloud_from,
             max_icp_distance,
             transformation,
-            o3d.registration.TransformationEstimationPointToPlane())
+            o3d.pipelines.registration.TransformationEstimationPointToPlane())
 
         transformation = icp_fine.transformation
 
-        icp_information = o3d.registration.get_information_matrix_from_point_clouds(
+        icp_information = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
             pointcloud_to,
             pointcloud_from,
             max_icp_distance,
@@ -223,9 +223,9 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine
     for index, node in enumerate(nx_pose_graph.nodes()):
         node_id_mapping[node] = index
 
-    o3d_pose_graph = o3d.registration.PoseGraph()
+    o3d_pose_graph = o3d.pipelines.registration.PoseGraph()
     for _ in range(0, len(nx_pose_graph.nodes())):
-        o3d_pose_graph.nodes.append(o3d.registration.PoseGraphNode(np.identity(4)))
+        o3d_pose_graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(np.identity(4)))
 
     for node_from, node_to in nx.edge_dfs(nx_pose_graph):
         node_from_id = node_id_mapping[node_from]
@@ -251,7 +251,7 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine
         # if we have a loop closure and didnt update the pose, we mark our edge as uncertain
         print(f'{color.BOLD}Adding new edge from point cloud {node_from} (id {node_from_id}) to point cloud {node_to} (id {node_to_id}){color.ENDC}')
         o3d_pose_graph.edges.append(
-            o3d.registration.PoseGraphEdge(node_to_id,
+            o3d.pipelines.registration.PoseGraphEdge(node_to_id,
                                            node_from_id,
                                            transformation,
                                            icp_information,
@@ -260,14 +260,14 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine
     # optimize the pose graph
     if optimize_graph:
         print(f'{color.BOLD}Optimizing pose graph ...{color.ENDC}')
-        option = o3d.registration.GlobalOptimizationOption(
+        option = o3d.pipelines.registration.GlobalOptimizationOption(
             max_correspondence_distance=max_icp_distance,
             edge_prune_threshold=3.0,
             preference_loop_closure=0.3,
             reference_node=0)
-        o3d.registration.global_optimization(
-            o3d_pose_graph, o3d.registration.GlobalOptimizationLevenbergMarquardt(),
-            o3d.registration.GlobalOptimizationConvergenceCriteria(), option)
+        o3d.pipelines.registration.global_optimization(
+            o3d_pose_graph, o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+            o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(), option)
         print(f'{color.BOLD}Finished optimization{color.ENDC}')
 
     return (o3d_pose_graph, node_id_mapping)
