@@ -127,7 +127,6 @@ def get_cloud(pointclouds, args, node_id):
 
 def register_pointcloud_pair(node_from, node_to, pointclouds, args):
     temp_dir = args.temp_dir
-    refine = args.refine
     run_icp = not args.no_icp
     max_icp_distance = args.icp_max_distance
     show_result = not args.hide_result
@@ -141,7 +140,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, args):
         transformation = np.loadtxt(transformation_file)
         icp_information = np.loadtxt(information_file)
 
-        if node_to not in refine:
+        if not args.refine_all and node_to not in args.refine_list:
             return transformation, icp_information
         else:
             print(f'{color.BOLD}Refining registration of {node_from} and {node_to}{color.ENDC}')
@@ -274,8 +273,8 @@ def register_pointclouds(pointclouds, nx_pose_graph, args):
         print(f'{color.BOLD}Optimizing pose graph ...{color.ENDC}')
         option = o3d.pipelines.registration.GlobalOptimizationOption(
             max_correspondence_distance=args.icp_max_distance,
-            edge_prune_threshold=3.0,
-            preference_loop_closure=0.3,
+            edge_prune_threshold=2.0,
+            preference_loop_closure=0.1,
             reference_node=0)
         o3d.pipelines.registration.global_optimization(
             o3d_pose_graph, o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
@@ -332,7 +331,10 @@ def main():
     parser.add_argument('--no-optimization', dest='no_optimization', required=False, default=False, action='store_true',
                         help='disables the optimization of the resulting posegraph')
 
-    parser.add_argument('-r', '--refine', dest='refine', required=False, default=[], action='store', nargs='+',
+    parser.add_argument('-R', '--refine-all', dest='refine_all', required=False, default=False, action='store_true',
+                        help='this does only work if "--no-icp" is not set')
+
+    parser.add_argument('-r', '--refine-list', dest='refine_list', required=False, default=[], action='store', nargs='+',
                         help='list of nodes whose poses should be refined (this does only work if "--no-icp" is not set)', type=str)
 
 
