@@ -64,23 +64,28 @@ def main():
         trans = np.loadtxt(trans_file)
         print("read {} and transform with {}".format(scan_file, trans_file))
         scan = o3d.io.read_point_cloud(scan_file).transform(trans)
-        if args.normals or not scan.has_normals():
-            if not scan.has_normals():
-                print("No normals in the cloud, estimating normals...")
-            else:
-                print("Estimate normals...")
-            scan.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
-                radius=args.n_radius, max_nn=args.n_max_nn))
-        print("add all points to the combined cloud")
+        #if args.normals or not scan.has_normals():
+        #    if not scan.has_normals():
+        #        print("No normals in the cloud, estimating normals...")
+        #    else:
+        #        print("Estimate normals...")
+        #    scan.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
+        #        radius=args.n_radius, max_nn=args.n_max_nn))
+      
+
+       # print("downsample scan with voxel_size", args.voxel_size)
+       # scan = scan.voxel_down_sample(voxel_size=args.voxel_size)
+       # print("add  downsampled scan to the combined cloud")
         cloud += scan
 
-    print("Down sample combined cloud with voxel_size", args.voxel_size)
-    cloud = cloud.voxel_down_sample(voxel_size=args.voxel_size)
-    print("max bound", cloud.get_max_bound(), "min_bound", cloud.get_min_bound())
+    #print("Down sample combined cloud with voxel_size", args.voxel_size)
+    #cloud = cloud.voxel_down_sample(voxel_size=args.voxel_size)
+    #print("max bound", cloud.get_max_bound(), "min_bound", cloud.get_min_bound())
+    #print("max bound", cloud.get_max_bound(), "min_bound", cloud.get_min_bound())
 
-    print("Remove radius outlier...")
-    cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
-    print("Removed", len(ids), "points.")
+    #print("Remove radius outlier...")
+    #cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+    #print("Removed", len(ids), "points.")
 
     os.chdir(owd)
 

@@ -20,6 +20,8 @@ def main():
                         help='point cloud input ply file', type=str)
     parser.add_argument('-o', '--output', dest='output', required=True, action='store',
                         help='mesh output ply file', type=str)
+    parser.add_argument('-v', '--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
+                        help='down sample voxel-size', type=float)
     parser.add_argument('--filtered-cloud', dest='filtered_cloud', required=False, type=str)
     parser.add_argument('-f', '--filter', dest='filter', required=False, default=True, action='store_true',
                         help='remove outliers')
@@ -50,12 +52,22 @@ def main():
 
     args = parser.parse_args()
 
+
     cloud = o3d.io.read_point_cloud(args.input)
 
-    if args.filter:
-        print("Remove radius outlier...")
-        cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
-        print("Removed", len(ids), "points.")
+    #tensorCloud= o3d.t.geometry.PointCloud.from_legacy_pointcloud(cloud)
+    #tensorCloud = o3d.cpu.pybind.PointCloud.from_legacy_pointcloud(cloud)
+    #tensorCloud.farthest_point_sampling(20000000)
+
+    #cloud = tensorCloud.to_legacy_pointcloud()
+
+    print("downsample cloud with voxel_size", args.voxel_size)
+    cloud = cloud.voxel_down_sample(voxel_size=args.voxel_size)
+
+    #if args.filter:
+    #    print("Remove radius outlier...")
+    #    cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+    #    print("Removed", len(ids), "points.")
 
     if args.normals or not cloud.has_normals():
         if not cloud.has_normals():
@@ -80,6 +92,7 @@ def main():
     mesh = mesh.remove_unreferenced_vertices()
 
     if args.edge_collapse:
+        cloud.clear()
         print("Quadric edge collapse to a target triangle number %s" % args.edge_collapse)
         mesh = mesh.simplify_quadric_decimation(args.edge_collapse)
 
