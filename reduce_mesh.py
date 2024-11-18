@@ -5,7 +5,16 @@ import numpy as np
 
 
 # Print iterations progress
-def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+def printProgressBar(
+    iteration,
+    total,
+    prefix="",
+    suffix="",
+    decimals=1,
+    length=100,
+    fill="█",
+    printEnd="\r",
+):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -20,8 +29,8 @@ def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, 
     """
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filledLength = int(length * iteration // total)
-    bar = fill * filledLength + '-' * (length - filledLength)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+    bar = fill * filledLength + "-" * (length - filledLength)
+    print(f"\r{prefix} |{bar}| {percent}% {suffix}", end=printEnd)
     # Print New Line on Complete
     if iteration == total:
         print()
@@ -29,24 +38,65 @@ def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Filtering of point cloud data (PCD) using Open3D',
+        description="Filtering of point cloud data (PCD) using Open3D",
     )
 
-    parser.add_argument('-i', '--input', dest='input', required=True, action='store',
-                        help='point cloud input ply file', type=str)
-    parser.add_argument('-o', '--output', dest='output', required=True, action='store',
-                        help='mesh output ply file', type=str)
-    parser.add_argument('-f', '--faces', dest='faces', default=0.5,
-                        help='factor [0, 1] or number ]1,n] of faces to remove')
-    parser.add_argument('-q', '--quadric-edge-collapse', dest='quadric', action='store_true', required=False, default=False,
-                        help='Use quadric edge collapse method to reduce the number of faces.')
-    parser.add_argument('-c', '--cluster-reduction', dest='cluster_reduction', action='store_true', required=False, default=False,
-                        help='Use the cluster reduction flag to reduce the non-connected cluster fragment.')
-    parser.add_argument('-e', '--edge-length', dest='max_edge_length', default=0,
-                        help='the maximum edge length. Edges with a longer edge will be removed')
-    parser.add_argument('--input-cloud', dest='input_cloud', default=None,
-                        help='Use an input cloud to remove triangles from the mesh which are to fare away')
-
+    parser.add_argument(
+        "-i",
+        "--input",
+        dest="input",
+        required=True,
+        action="store",
+        help="point cloud input ply file",
+        type=str,
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        dest="output",
+        required=True,
+        action="store",
+        help="mesh output ply file",
+        type=str,
+    )
+    parser.add_argument(
+        "-f",
+        "--faces",
+        dest="faces",
+        default=0.5,
+        help="factor [0, 1] or number ]1,n] of faces to remove",
+    )
+    parser.add_argument(
+        "-q",
+        "--quadric-edge-collapse",
+        dest="quadric",
+        action="store_true",
+        required=False,
+        default=False,
+        help="Use quadric edge collapse method to reduce the number of faces.",
+    )
+    parser.add_argument(
+        "-c",
+        "--cluster-reduction",
+        dest="cluster_reduction",
+        action="store_true",
+        required=False,
+        default=False,
+        help="Use the cluster reduction flag to reduce the non-connected cluster fragment.",
+    )
+    parser.add_argument(
+        "-e",
+        "--edge-length",
+        dest="max_edge_length",
+        default=0,
+        help="the maximum edge length. Edges with a longer edge will be removed",
+    )
+    parser.add_argument(
+        "--input-cloud",
+        dest="input_cloud",
+        default=None,
+        help="Use an input cloud to remove triangles from the mesh which are to fare away",
+    )
 
     args = parser.parse_args()
 
@@ -57,17 +107,26 @@ def main():
     print(f"The input mesh has {num_triangles} triangles.")
 
     if args.quadric:
-        num_triangles_out = int(args.faces * num_triangles) if 0 < args.faces <= 1 else int(args.faces)
-        print(f"Quadric Edge Collapse from {num_triangles} to {num_triangles_out} triangles...")
+        num_triangles_out = (
+            int(args.faces * num_triangles) if 0 < args.faces <= 1 else int(args.faces)
+        )
+        print(
+            f"Quadric Edge Collapse from {num_triangles} to {num_triangles_out} triangles..."
+        )
         mesh_out = mesh.simplify_quadric_decimation(num_triangles_out)
         print(f"Quadric Edge Collapse done")
+        del mesh
     else:
         mesh_out = mesh
 
     if args.input_cloud:
-        print(f"reading input cloud to remove triangles which are to far away from the cloud.")
+        print(
+            f"reading input cloud to remove triangles which are to far away from the cloud."
+        )
         cloud = o3d.io.read_point_cloud(args.input_cloud, print_progress=True)
-        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(cloud, voxel_size=0.6)
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+            cloud, voxel_size=0.6
+        )
         cloud_mask = ~np.asarray(voxel_grid.check_if_included(mesh_out.vertices))
         mesh_out.remove_vertices_by_mask(cloud_mask)
         mesh_out.remove_unreferenced_vertices()
@@ -89,7 +148,11 @@ def main():
             dist_c = np.linalg.norm(b - a)
             dist_b = np.linalg.norm(a - c)
             dist_a = np.linalg.norm(c - b)
-            mask[i] = dist_a > args.max_edge_length or dist_b > args.max_edge_length or dist_c > args.max_edge_length
+            mask[i] = (
+                dist_a > float(args.max_edge_length)
+                or dist_b > float(args.max_edge_length)
+                or dist_c > float(args.max_edge_length)
+            )
 
         mesh_out.remove_triangles_by_mask(mask)
         mesh_out.remove_unreferenced_vertices()
@@ -100,11 +163,15 @@ def main():
         # contains the number of triangles per cluster, and a third vector contains the surface area per cluster.
 
         print("Find connected mesh fragments to remove non-connected artefacts...")
-        cluster_indices, num_triangles_per_cluster, surface_area_per_cluster = mesh_out.cluster_connected_triangles()
+        cluster_indices, num_triangles_per_cluster, surface_area_per_cluster = (
+            mesh_out.cluster_connected_triangles()
+        )
 
         print(f"Found {len(num_triangles_per_cluster)} clusters.")
         max_index = num_triangles_per_cluster.index(max(num_triangles_per_cluster))
-        print(f"Cluster {max_index} has {num_triangles_per_cluster[max_index]} triangles.")
+        print(
+            f"Cluster {max_index} has {num_triangles_per_cluster[max_index]} triangles."
+        )
         # for i, num_triangles in enumerate(num_triangles_per_cluster):
         #    if num_triangles > 1000:
         #        print(f"Cluster {i} has {num_triangles} triangles.")
