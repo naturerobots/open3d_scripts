@@ -4,6 +4,7 @@ import open3d as o3d
 import numpy as np
 import glob
 import os
+import gc
 import re
 
 
@@ -25,7 +26,7 @@ def main():
     parser.add_argument('-o', '--output', dest='output', required=True, action='store',
                         help='cloud output ply file', type=str)
     parser.add_argument('-v', '--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
-                        help='down sample voxel-size', type=float)
+                        help='down sample voxel-size. 0 for no downsampling', type=float)
     parser.add_argument('--f-points', dest='filter_nb_points', required=False, default=10, action='store',
                         help='filter parameter: The minimum number of neighbour points within the filter radius.',
                         type=check_positive)
@@ -38,6 +39,10 @@ def main():
                         help='radius to consider for the normal estimation.')
     parser.add_argument('--n-max-nn', dest='n_max_nn', action='store', required=False, default=30, type=float,
                         help='maximum number of nearest neighbors for normal estimation.')
+                        
+    parser.add_argument('--no-outlier-removal', dest='no_outlier_removal', required=False, default=False,
+                        action='store_true',
+                        help='use remove_radius_outlier for each pointcloud')
 
     scan_file_pattern = "scan_*.ply"
     parser.add_argument('--scan-file-pattern', dest='scan_pattern', action='store', required=False,
@@ -73,14 +78,19 @@ def main():
                 radius=args.n_radius, max_nn=args.n_max_nn))
         print("add all points to the combined cloud")
         cloud += scan
+        del scan
+        
+    gc.collect()
 
-    print("Down sample combined cloud with voxel_size", args.voxel_size)
-    cloud = cloud.voxel_down_sample(voxel_size=args.voxel_size)
-    print("max bound", cloud.get_max_bound(), "min_bound", cloud.get_min_bound())
+    if args.voxel_size > 0:
+        print("Down sample combined cloud with voxel_size", args.voxel_size)
+        cloud = cloud.voxel_down_sample(voxel_size=args.voxel_size)
+        print("max bound", cloud.get_max_bound(), "min_bound", cloud.get_min_bound())
 
-    print("Remove radius outlier...")
-    cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
-    print("Removed", len(ids), "points.")
+    if not args.no_outlier_removal:
+        print("Remove radius outlier...")
+        cloud, ids = cloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+        print("Removed", len(ids), "points.")
 
     os.chdir(owd)
 

@@ -34,7 +34,9 @@ def check_positive(value):
     return ivalue
 
 
-def load_pointcloud(file, args = None, preview = False):
+def load_pointcloud(cloud_id, args, preview=False):
+    file = args.scan_pattern.replace('*', str(cloud_id).zfill(args.num_id_digits))
+
     print(f'Loading point cloud from file {file} ...')
     pointcloud = o3d.io.read_point_cloud(file)
     if preview:
@@ -42,7 +44,8 @@ def load_pointcloud(file, args = None, preview = False):
         print('Filtering point cloud ...')
         pointcloud = pointcloud.voxel_down_sample(voxel_size=args.voxel_size)
 
-    pointcloud, ids = pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
+    if not args.no_outlier_removal:
+        pointcloud, ids = pointcloud.remove_radius_outlier(args.filter_nb_points, args.filter_radius)
 
     if not pointcloud.has_normals():
         print('Estimating normals ...')
@@ -85,9 +88,9 @@ def load_posegraph(args):
 
             # load pointclouds
             if not edge[0] in pointclouds:
-                pointclouds[edge[0]] = load_pointcloud(file_from, args=args, preview=True)
+                pointclouds[edge[0]] = None
             if not edge[1] in pointclouds:
-                pointclouds[edge[1]] = load_pointcloud(file_to, args=args, preview=True)
+                pointclouds[edge[1]] = None
 
             # add edge to networkx graph
             graph.add_edge(edge[0], edge[1])
@@ -116,9 +119,33 @@ def pick_points(pcd, node_from, node_to, node_current):
     return vis.get_picked_points()
 
 
-def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, run_icp=True, max_icp_distance=0.2, show_result=True):
-    pointcloud_from = pointclouds[node_from]
-    pointcloud_to = pointclouds[node_to]
+def get_cloud(pointclouds, args, node_id):
+    # TODO remove point clouds afterwards if it is not needed anymore
+    if not pointclouds[node_id]:
+        pointclouds[node_id] = load_pointcloud(node_id, args)
+    return pointclouds[node_id]
+
+def downsample_pointcloud(pcd, voxel_size):
+    print(f'{color.BOLD}Downsample with a voxel size %.3f.{color.ENDC}' % voxel_size)
+    pcd_down = pcd.voxel_down_sample(voxel_size)
+
+    radius_normal = voxel_size * 2
+    print(f'{color.BOLD}Estimate normal with search radius %.3f.{color.ENDC}' % radius_normal)
+    pcd_down.estimate_normals(
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+
+    radius_feature = voxel_size * 5
+    print(f'{color.BOLD}Compute FPFH feature with search radius %.3f.{color.ENDC}' % radius_feature)
+    pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+        pcd_down,
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+    return pcd_down, pcd_fpfh
+
+def register_pointcloud_pair(node_from, node_to, pointclouds, args):
+    temp_dir = args.temp_dir
+    run_icp = not args.no_icp
+    max_icp_distance = args.icp_max_distance
+    show_result = not args.hide_result
 
     transformation_file = f'{temp_dir}/{node_from}_to_{node_to}.trans'
     information_file = f'{temp_dir}/{node_from}_to_{node_to}.info'
@@ -129,18 +156,18 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
         transformation = np.loadtxt(transformation_file)
         icp_information = np.loadtxt(information_file)
 
-        print(refine)
-        if node_to not in refine:
-            return (transformation, icp_information)
+        if not args.refine_all and node_to not in args.refine_list:
+            return transformation, icp_information
         else:
             print(f'{color.BOLD}Refining registration of {node_from} and {node_to}{color.ENDC}')
-    else:
+
+    elif args.mode == 'picking':
         # pick at least three correspondences between both pointclouds
         picked_points_from = []
         picked_points_to = []
         while len(picked_points_from) < 3 or len(picked_points_to) < 3 or len(picked_points_from) != len(picked_points_to):
-            picked_points_from = pick_points(pointcloud_from , node_from, node_to, node_from)
-            picked_points_to = pick_points(pointcloud_to, node_from, node_to, node_to)
+            picked_points_from = pick_points(get_cloud(pointclouds, args, node_from), node_from, node_to, node_from)
+            picked_points_to = pick_points(get_cloud(pointclouds, args, node_to), node_from, node_to, node_to)
 
         correspondences = np.zeros((len(picked_points_from), 2))
         correspondences[:, 0] = picked_points_to
@@ -150,18 +177,32 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
         print(f'{color.BOLD}Compute a rough transform using the correspondences given by user ...{color.ENDC}')
         p2p = o3d.pipelines.registration.TransformationEstimationPointToPoint()
         transformation = p2p.compute_transformation(
-                pointcloud_to,
-                pointcloud_from,
+                get_cloud(pointclouds, args, node_to),
+                get_cloud(pointclouds, args, node_from),
                 o3d.utility.Vector2iVector(correspondences))
 
         icp_information = np.zeros((6, 6))
+
+    elif args.mode == 'fast_feature':
+        distance_threshold = args.voxel_size * 0.5
+
+        source_down, source_fpfh = downsample_pointcloud(get_cloud(pointclouds, args, node_to), args.voxel_size)
+        target_down, target_fpfh = downsample_pointcloud(get_cloud(pointclouds, args, node_from), args.voxel_size)
+
+        print(f'{color.BOLD}Apply fast global registration with distance threshold %.3f{color.ENDC}' % distance_threshold)
+        result = o3d.pipelines.registration.registration_fast_based_on_feature_matching(
+            source_down, target_down, source_fpfh, target_fpfh,
+            o3d.pipelines.registration.FastGlobalRegistrationOption(
+                maximum_correspondence_distance=distance_threshold))
+
+        transformation = result.transformation
 
     if run_icp:
         print(f'{color.BOLD}Applying point-to-plane ICP ...{color.ENDC}')
 
         icp_fine = o3d.pipelines.registration.registration_icp(
-            pointcloud_to,
-            pointcloud_from,
+            get_cloud(pointclouds, args, node_to),
+            get_cloud(pointclouds, args, node_from),
             max_icp_distance,
             transformation,
             o3d.pipelines.registration.TransformationEstimationPointToPlane())
@@ -169,8 +210,8 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
         transformation = icp_fine.transformation
 
         icp_information = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
-            pointcloud_to,
-            pointcloud_from,
+            get_cloud(pointclouds, args, node_to),
+            get_cloud(pointclouds, args, node_from),
             max_icp_distance,
             icp_fine.transformation)
 
@@ -189,7 +230,7 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
         key_to_callback[ord("B")] = bad_reg
 
         # transform pointcloud_to
-        transformed_to = o3d.geometry.PointCloud(pointcloud_to)
+        transformed_to = o3d.geometry.PointCloud(get_cloud(pointclouds, args, node_to))
         transformed_to.transform(transformation)
 
         # show result
@@ -202,22 +243,23 @@ def register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, 
         print("")
 
         o3d.visualization.draw_geometries_with_key_callbacks(
-                [transformed_to, pointcloud_from],
+                [transformed_to, get_cloud(pointclouds, args, node_from)],
                 window_name=f'Result of registration between point cloud {node_from} and {node_to}',
                 key_to_callback=key_to_callback)
 
         if bad:
             print(f'{color.WARNING}Retrying registration of point cloud {node_from} and {node_to}.{color.ENDC}')
             # rerun pair registration
-            return register_pointcloud_pair(node_from, node_to, pointclouds, temp_dir, refine, run_icp, max_icp_distance, show_result)
+            return register_pointcloud_pair(node_from, node_to, pointclouds, args)
 
     np.savetxt(transformation_file, transformation)
     np.savetxt(information_file, icp_information)
 
-    return (transformation, icp_information)
+    return transformation, icp_information
 
 
-def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine, run_icp=True, max_icp_distance=0.2, show_result=True, optimize_graph=True):
+def register_pointclouds(pointclouds, nx_pose_graph, args):
+
     # because every node is a key of the adjacency list, this will give all node ids
     node_id_mapping = {}
     for index, node in enumerate(nx_pose_graph.nodes()):
@@ -237,11 +279,8 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine
                 node_from,
                 node_to,
                 pointclouds,
-                temp_dir,
-                refine,
-                run_icp,
-                max_icp_distance,
-                show_result)
+                args
+        )
 
         # only update pose of the node if the pose has not been set yet. The other possible case is a loop closure
         if (o3d_pose_graph.nodes[node_to_id].pose == np.identity(4)).all():
@@ -258,12 +297,12 @@ def register_pointclouds(pointclouds, nx_pose_graph, root_node, temp_dir, refine
                                            uncertain=(o3d_pose_graph.nodes[node_to_id].pose != np.identity(4)).all()))
 
     # optimize the pose graph
-    if optimize_graph:
+    if not args.no_optimization:
         print(f'{color.BOLD}Optimizing pose graph ...{color.ENDC}')
         option = o3d.pipelines.registration.GlobalOptimizationOption(
-            max_correspondence_distance=max_icp_distance,
-            edge_prune_threshold=3.0,
-            preference_loop_closure=0.3,
+            max_correspondence_distance=args.icp_max_distance,
+            edge_prune_threshold=2.0,
+            preference_loop_closure=0.1,
             reference_node=0)
         o3d.pipelines.registration.global_optimization(
             o3d_pose_graph, o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
@@ -301,14 +340,17 @@ def main():
                         type=int, help='Fill up id with zeros to have at least this amount of digits')
 
     # filters for preview to filter the rinal cloud, use the filter script
-    parser.add_argument('--voxel-size', dest='voxel_size', required=False, default=0.08, action='store',
-                        help='down sample voxel-size for preview')
+    parser.add_argument('--voxel-size', dest='voxel_size', required=False, default=0.05, action='store',
+                        help='down sample voxel-size')
     parser.add_argument('--f-points', dest='filter_nb_points', required=False, default=10, action='store',
                         help='preview filter parameter: The minimum number of neighbour points within the filter radius.',
                         type=check_positive)
     parser.add_argument('--f-radius', dest='filter_radius', required=False, default=0.2, action='store',
                         help='preview filter parameter: The radius in which to count for the minimum number of points.',
                         type=float)
+    parser.add_argument('--no-outlier-removal', dest='no_outlier_removal', required=False, default=False,
+                        action='store_true',
+                        help='use remove_radius_outlier for each pointcloud')
 
     # optimization
     parser.add_argument('--no-icp', dest='no_icp', required=False, default=False, action='store_true',
@@ -320,8 +362,13 @@ def main():
     parser.add_argument('--no-optimization', dest='no_optimization', required=False, default=False, action='store_true',
                         help='disables the optimization of the resulting posegraph')
 
-    parser.add_argument('-r', '--refine', dest='refine', required=False, default=[], action='store', nargs='+',
+    parser.add_argument('-R', '--refine-all', dest='refine_all', required=False, default=False, action='store_true',
+                        help='this does only work if "--no-icp" is not set')
+
+    parser.add_argument('-r', '--refine-list', dest='refine_list', required=False, default=[], action='store', nargs='+',
                         help='list of nodes whose poses should be refined (this does only work if "--no-icp" is not set)', type=str)
+
+
 
 
     # miscelaneous options
@@ -334,14 +381,19 @@ def main():
     parser.add_argument('-v', '--verbose', dest='verbose', required=False, default=False, action='store_true',
                         help='enable open3d debug output')
 
+    parser.add_argument('-m', '--mode', dest='mode', required=False, action='store', default='picking',
+                        help="mode of global registration e.g. \'picking\', \'fast_feature\'")
+
     args = parser.parse_args()
 
     if args.verbose:
         o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
 
-    print(f'{color.OKBLUE}{color.BOLD}Loading graph and pointclouds ...{color.ENDC}')
+    print(f'{color.OKBLUE}{color.BOLD}Loading graph and point clouds ...{color.ENDC}')
+
+    # point clouds are initialized as key values dict, where the values will be initialized later
     pointclouds, nx_pose_graph = load_posegraph(args)
-    print(f'{color.OKBLUE}{color.BOLD}Finished loading graph and pointclouds{color.ENDC}')
+    print(f'{color.OKBLUE}{color.BOLD}Finished loading graph and point clouds{color.ENDC}')
 
     # check pose graph correctness
     if len(list(nx.simple_cycles(nx_pose_graph))) > 0:
@@ -349,6 +401,7 @@ def main():
         print('Tf your circle is a loop closure, flip the last edge of the loop.')
         return
 
+    # TODO root node detection might be removed
     root_nodes = [node for node in nx_pose_graph.nodes() if len(list(nx_pose_graph.in_edges(node))) == 0]
     if len(root_nodes) != 1:
         print(f'{color.FAIL}ERROR: There is only one node with in-degree 1 (origin node) allowed in the pose graph!{color.ENDC}')
@@ -360,7 +413,7 @@ def main():
         nx.draw_networkx(nx_pose_graph, nx.spring_layout(nx_pose_graph))
         plt.show()
 
-    print(f'{color.OKBLUE}{color.BOLD}Registering pointclouds ...{color.ENDC}')
+    print(f'{color.OKBLUE}{color.BOLD}Registering point clouds ...{color.ENDC}')
     # create temp dir
     if not os.path.exists(args.temp_dir):
         os.makedirs(args.temp_dir)
@@ -369,13 +422,8 @@ def main():
     o3d_pose_graph, node_id_mapping = register_pointclouds(
             pointclouds,
             nx_pose_graph,
-            root_node,
-            args.temp_dir,
-            args.refine,
-            not args.no_icp,
-            args.icp_max_distance,
-            not args.hide_result,
-            not args.no_optimization)
+            args)
+
     print(f'{color.OKBLUE}{color.BOLD}Finished registration of pointclouds{color.ENDC}')
 
     print(f'{color.OKBLUE}{color.BOLD}Saving results ...{color.ENDC}')
